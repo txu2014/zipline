@@ -1,19 +1,25 @@
 import datetime
-import os
+import os, sys
 import numpy as np
 import pandas as pd
 from six import iteritems
 from tqdm import tqdm
 from trading_calendars import get_calendar
 import logging
+from dask import dataframe as dd
 
 from zipline.assets.futures import CME_CODE_TO_MONTH
-from zipline.data.bundles import core as bundles
+#from zipline.data.bundles import core as bundles
+from logbook import Logger, StreamHandler
+from zipline.utils.cli import maybe_show_progress
+from . import core as bundles
 
+handler = StreamHandler(sys.stdout, format_string=" | {record.message}")
+logger = Logger(__name__)
+logger.handlers.append(handler)
 
 def csvdir_futures(tframes, csvdir):
     return CSVDIRFutures(tframes, csvdir).ingest
-
 
 class CSVDIRFutures:
     """
@@ -67,25 +73,26 @@ def third_friday(year, month):
     return third
 
 
-def load_data(parent_dir):
-    """Given a parent_dir of cross-sectional daily files,
-       read in all the days and return a big dataframe.
-    """
-
-    # list the files
-    filelist = os.listdir(parent_dir)
-    # read them into pandas
-    df_list = [
-        pd.read_csv(os.path.join(parent_dir, file), parse_dates=[1])
-        for file
-        in tqdm(filelist)
-    ]
-    # concatenate them together
-    big_df = pd.concat(df_list)
-    big_df.columns = map(str.lower, big_df.columns)
-    big_df.symbol = big_df.symbol.astype('str')
-    mask = big_df.symbol.str.len() == 5  # e.g., ESU18; doesn't work prior to year 2000
-    return big_df.loc[mask]
+# def load_data(dir_csv):
+#     """Given a parent_dir of cross-sectional daily files,
+#        read in all the days and return a big dataframe.
+#     """
+#     df = dd.read_csv(os.path.join(dir_csv, '*.csv')).compute
+#     return df
+    # # list the files
+    # filelist = os.listdir(dir_csv)
+    # # read them into pandas
+    # df_list = [
+    #     pd.read_csv(os.path.join(parent_dir, file), parse_dates=[1])
+    #     for file
+    #     in tqdm(filelist)
+    # ]
+    # # concatenate them together
+    # big_df = pd.concat(df_list)
+    # big_df.columns = map(str.lower, big_df.columns)
+    # big_df.symbol = big_df.symbol.astype('str')
+    # mask = big_df.symbol.str.len() == 5  # e.g., ESU18; doesn't work prior to year 2000
+    # return big_df.loc[mask]
 
 
 def gen_asset_metadata(data, show_progress, exchange='EXCH'):
@@ -132,11 +139,24 @@ def parse_pricing_and_vol(data,
             level=1
         ).reindex(
             sessions.tz_localize(None)
-        ).fillna(0.0)
+        )
         yield asset_id, asset_data
 
 
-@bundles.register('futures')
+def parse_minute_data(data,
+                      sessions,
+                      symbol_map):
+    for asset_id, symbol in iteritems(symbol_map):
+        asset_data = data.xs(
+            symbol,
+            level=1
+        ).reindex(
+            sessions.tz_localize(None)
+        )
+        yield asset_id, asset_data
+
+
+@bundles.register('csvdir_futures')
 def futures_bundle(environ,
                    asset_db_writer,
                    minute_bar_writer,
@@ -150,10 +170,13 @@ def futures_bundle(environ,
                    output_dir,
                    tframes=None,
                    csvdir=None):
-    import pdb;
+    import pdb
     pdb.set_trace()
-    raw_data = load_data('/Users/jonathan/devwork/pricing_data/CME_2018')
-    asset_metadata = gen_asset_metadata(raw_data, False)
+    #raw_data = load_data('/Users/jonathan/devwork/pricing_data/CME_2018')
+    #if 'daily' in tframes:
+    dir_daily = os.path.join(csvdir, 'daily')
+    df_data = dd.read_csv(os.path.join(dir_daily, "*.csv")).compute()
+    asset_metadata = gen_asset_metadata(df_data, False)
     root_symbols = asset_metadata.root_symbol.unique()
     root_symbols = pd.DataFrame(root_symbols, columns=['root_symbol'])
     root_symbols['root_symbol_id'] = root_symbols.index.values
@@ -162,12 +185,23 @@ def futures_bundle(environ,
 
     symbol_map = asset_metadata.symbol
     sessions = calendar.sessions_in_range(start_session, end_session)
-    raw_data.set_index(['date', 'symbol'], inplace=True)
+    df_data.set_index(['date', 'symbol'], inplace=True)
     daily_bar_writer.write(
         parse_pricing_and_vol(
-            raw_data,
+            df_data,
             sessions,
             symbol_map
         ),
         show_progress=show_progress
     )
+    if 'minute' in tframes:
+        dir_minute = os.path.join(csvdir, 'minute')
+        df_data = dd.read_csv(os.path.join(dir_minute, "*.csv")).compute()
+        minute_bar_writer.write(
+            parse_minute_data(
+                df_data,
+                sessions,
+                symbol_map
+            ),
+            show_progress=show_progress
+        )
