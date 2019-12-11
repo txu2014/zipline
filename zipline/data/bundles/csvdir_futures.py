@@ -102,17 +102,16 @@ def third_friday(year, month):
 def gen_asset_metadata(data, show_progress, exchange='CME'):
     if show_progress:
         logging.info('Generating asset metadata.')
-
+    data = data.rename(columns={'Date':'date', 'Symbol':'symbol'})
     data = data.groupby(
-        by='Symbol'
+        by='symbol'
     ).agg(
-        {'Date': [np.min, np.max]}
+        {'date': [np.min, np.max]}
     )
     data.reset_index(inplace=True)
     #data['Date'] = pd.to_datetime(data['Date'], infer_datetime_format=True)
-    data['symbol'] = data['Symbol']
-    data['start_date'] = data.Date.amin
-    data['end_date'] = data.Date.amax
+    data['start_date'] = data.date.amin
+    data['end_date'] = data.date.amax
     del data['date']
     data.columns = data.columns.get_level_values(0)
 
@@ -192,7 +191,7 @@ def futures_bundle(environ,
 
     symbol_map = asset_metadata.symbol
     sessions = calendar.sessions_in_range(start_session, end_session)
-    df_data.set_index(['Date', 'symbol'], inplace=True)
+    df_data.set_index(['date', 'symbol'], inplace=True)
     daily_bar_writer.write(
         parse_pricing_and_vol(
             df_data,
