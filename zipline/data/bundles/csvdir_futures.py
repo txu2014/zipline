@@ -8,7 +8,7 @@ from trading_calendars import get_calendar
 import logging
 from dask import dataframe as dd
 
-from zipline.assets.futures import CME_CODE_TO_MONTH
+from zipline.assets.futures import CMES_CODE_TO_MONTH
 #from zipline.data.bundles import core as bundles
 from logbook import Logger, StreamHandler
 from zipline.utils.cli import maybe_show_progress
@@ -20,6 +20,10 @@ logger.handlers.append(handler)
 
 def csvdir_futures(tframes, csvdir):
     return CSVDIRFutures(tframes, csvdir).ingest
+
+
+#CME_CODE_TO_MONTH = dict(zip('FGHJKMNQUVXZ', range(1, 13)))
+
 
 class CSVDIRFutures:
     """
@@ -95,26 +99,28 @@ def third_friday(year, month):
     # return big_df.loc[mask]
 
 
-def gen_asset_metadata(data, show_progress, exchange='EXCH'):
+def gen_asset_metadata(data, show_progress, exchange='CME'):
     if show_progress:
         logging.info('Generating asset metadata.')
 
     data = data.groupby(
-        by='symbol'
+        by='Symbol'
     ).agg(
-        {'date': [np.min, np.max]}
+        {'Date': [np.min, np.max]}
     )
     data.reset_index(inplace=True)
-    data['start_date'] = data.date.amin
-    data['end_date'] = data.date.amax
+    #data['Date'] = pd.to_datetime(data['Date'], infer_datetime_format=True)
+    data['symbol'] = data['Symbol']
+    data['start_date'] = data.Date.amin
+    data['end_date'] = data.Date.amax
     del data['date']
     data.columns = data.columns.get_level_values(0)
 
     data['exchange'] = exchange
-    data['root_symbol'] = data.symbol.str.slice(0, 2)
+    data['root_symbol'] = data['symbol'].str.slice(0, 2)
 
     data['exp_month_letter'] = data.symbol.str.slice(2, 3)
-    data['exp_month'] = data['exp_month_letter'].map(CME_CODE_TO_MONTH)
+    data['exp_month'] = data['exp_month_letter'].map(CMES_CODE_TO_MONTH)
     data['exp_year'] = 2000 + data.symbol.str.slice(3, 5).astype('int')
     data['expiration_date'] = data.apply(lambda x: third_friday(x.exp_year, x.exp_month), axis=1)
     del data['exp_month_letter']
@@ -170,12 +176,13 @@ def futures_bundle(environ,
                    output_dir,
                    tframes=None,
                    csvdir=None):
-    import pdb
+    import pdb;
     pdb.set_trace()
     #raw_data = load_data('/Users/jonathan/devwork/pricing_data/CME_2018')
     #if 'daily' in tframes:
     dir_daily = os.path.join(csvdir, 'daily')
     df_data = dd.read_csv(os.path.join(dir_daily, "*.csv")).compute()
+    df_data['Date'] = pd.to_datetime(df_data['Date'], infer_datetime_format=True)
     asset_metadata = gen_asset_metadata(df_data, False)
     root_symbols = asset_metadata.root_symbol.unique()
     root_symbols = pd.DataFrame(root_symbols, columns=['root_symbol'])
@@ -185,7 +192,7 @@ def futures_bundle(environ,
 
     symbol_map = asset_metadata.symbol
     sessions = calendar.sessions_in_range(start_session, end_session)
-    df_data.set_index(['date', 'symbol'], inplace=True)
+    df_data.set_index(['Date', 'symbol'], inplace=True)
     daily_bar_writer.write(
         parse_pricing_and_vol(
             df_data,
@@ -196,10 +203,11 @@ def futures_bundle(environ,
     )
     if 'minute' in tframes:
         dir_minute = os.path.join(csvdir, 'minute')
-        df_data = dd.read_csv(os.path.join(dir_minute, "*.csv")).compute()
+        df_data_minute = dd.read_csv(os.path.join(dir_minute, "*.csv")).compute()
+        df_data_minute['Datetime'] = pd.to_datetime(df_data_minute['Datetime'], infer_datetime_format=True)
         minute_bar_writer.write(
             parse_minute_data(
-                df_data,
+                df_data_minute,
                 sessions,
                 symbol_map
             ),
