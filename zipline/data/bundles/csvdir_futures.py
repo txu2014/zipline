@@ -99,7 +99,7 @@ def third_friday(year, month):
     # return big_df.loc[mask]
 
 
-def gen_asset_metadata(data, show_progress, exchange='CME'):
+def gen_asset_metadata(data, show_progress, exchange='EXCH'):
     if show_progress:
         logging.info('Generating asset metadata.')
     data = data.rename(columns={'Date':'date', 'Symbol':'symbol'})
