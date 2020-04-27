@@ -102,7 +102,7 @@ def third_friday(year, month):
 def gen_asset_metadata(data, show_progress, exchange='EXCH'):
     if show_progress:
         logging.info('Generating asset metadata.')
-    data = data.rename(columns={'Date':'date', 'Symbol':'symbol'})
+
     data = data.groupby(
         by='symbol'
     ).agg(
@@ -175,17 +175,19 @@ def futures_bundle(environ,
                    output_dir,
                    tframes=None,
                    csvdir=None):
-    import pdb;
+    import pdb
     pdb.set_trace()
     #raw_data = load_data('/Users/jonathan/devwork/pricing_data/CME_2018')
     #if 'daily' in tframes:
     dir_daily = os.path.join(csvdir, 'daily')
     df_data = dd.read_csv(os.path.join(dir_daily, "*.csv")).compute()
-    df_data['Date'] = pd.to_datetime(df_data['Date'], infer_datetime_format=True)
+    df_data.columns = map(str.lower, df_data.columns)
+    df_data['date'] = pd.to_datetime(df_data['date'], infer_datetime_format=True)
     asset_metadata = gen_asset_metadata(df_data, False)
     root_symbols = asset_metadata.root_symbol.unique()
     root_symbols = pd.DataFrame(root_symbols, columns=['root_symbol'])
     root_symbols['root_symbol_id'] = root_symbols.index.values
+    root_symbols['exchange'] = 'EXCH'
 
     asset_db_writer.write(futures=asset_metadata, root_symbols=root_symbols)
 
@@ -203,7 +205,9 @@ def futures_bundle(environ,
     if 'minute' in tframes:
         dir_minute = os.path.join(csvdir, 'minute')
         df_data_minute = dd.read_csv(os.path.join(dir_minute, "*.csv")).compute()
-        df_data_minute['Datetime'] = pd.to_datetime(df_data_minute['Datetime'], infer_datetime_format=True)
+        df_data_minute.columns = map(str.lower, df_data_minute.columns)
+        df_data_minute['datetime'] = pd.to_datetime(df_data_minute['datetime'], infer_datetime_format=True)
+        df_data_minute = df_data_minute.set_index(['datetime', 'symbol'])
         minute_bar_writer.write(
             parse_minute_data(
                 df_data_minute,

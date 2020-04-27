@@ -7,6 +7,7 @@ import sys
 from logbook import Logger, StreamHandler
 from numpy import empty
 from pandas import DataFrame, read_csv, Index, Timedelta, NaT
+import pandas as pd
 from trading_calendars import register_calendar_alias
 
 from zipline.utils.cli import maybe_show_progress
@@ -133,7 +134,6 @@ def csvdir_bundle(environ,
                                                 'effective_date'])}
     for tframe in tframes:
         ddir = os.path.join(csvdir, tframe)
-
         symbols = sorted(item.split('.csv')[0]
                          for item in os.listdir(ddir)
                          if '.csv' in item)
@@ -146,29 +146,33 @@ def csvdir_bundle(environ,
                  ('symbol', 'object')]
         metadata = DataFrame(empty(len(symbols), dtype=dtype))
 
-        if tframe == 'minute':
-            writer = minute_bar_writer
-        else:
+        if tframe == 'daily':
             writer = daily_bar_writer
+            writer.write(_pricing_iter(ddir, symbols, metadata,
+                         divs_splits, show_progress),
+                         show_progress=show_progress)
+            # Hardcode the exchange to "CSVDIR" for all assets and (elsewhere)
+            # register "CSVDIR" to resolve to the NYSE calendar, because these
+            # are all equities and thus can use the NYSE calendar.
+            metadata['exchange'] = "EXCH"
+            #metadata['start_date'] = pd.to_datetime(start_session)
+            asset_db_writer.write(equities=metadata)
 
-        writer.write(_pricing_iter(ddir, symbols, metadata,
-                     divs_splits, show_progress),
-                     show_progress=show_progress)
+            divs_splits['divs']['sid'] = divs_splits['divs']['sid'].astype(int)
+            divs_splits['splits']['sid'] = divs_splits['splits']['sid'].astype(int)
+            adjustment_writer.write(splits=divs_splits['splits'],
+                                    dividends=divs_splits['divs'])
 
-        # Hardcode the exchange to "CSVDIR" for all assets and (elsewhere)
-        # register "CSVDIR" to resolve to the NYSE calendar, because these
-        # are all equities and thus can use the NYSE calendar.
-        metadata['exchange'] = "CSVDIR"
-
-        asset_db_writer.write(equities=metadata)
-
-        divs_splits['divs']['sid'] = divs_splits['divs']['sid'].astype(int)
-        divs_splits['splits']['sid'] = divs_splits['splits']['sid'].astype(int)
-        adjustment_writer.write(splits=divs_splits['splits'],
-                                dividends=divs_splits['divs'])
+        else:
+            writer = minute_bar_writer
+            writer.write(_pricing_iter(ddir, symbols, metadata,
+                         divs_splits, show_progress),
+                         show_progress=show_progress)
 
 
-def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress):
+
+
+def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress,):
     with maybe_show_progress(symbols, show_progress,
                              label='Loading custom pricing data: ') as it:
         files = os.listdir(csvdir)
@@ -185,8 +189,9 @@ def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress):
                            parse_dates=[0],
                            infer_datetime_format=True,
                            index_col=0).sort_index()
-
+            dfr.columns = map(str.lower, dfr.columns)
             start_date = dfr.index[0]
+            #start_date = pd.to_datetime(start_session)
             end_date = dfr.index[-1]
 
             # The auto_close date is the day after the last trade.
@@ -224,4 +229,4 @@ def _pricing_iter(csvdir, symbols, metadata, divs_splits, show_progress):
             yield sid, dfr
 
 
-register_calendar_alias("CSVDIR", "NYSE")
+#register_calendar_alias("CSVDIR", "NYSE")
