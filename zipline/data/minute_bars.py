@@ -70,15 +70,20 @@ class MinuteBarReader(BarReader):
 
 
 def _calc_minute_index(market_opens, minutes_per_day):
+    #print(market_opens, minutes_per_day)
     minutes = np.zeros(len(market_opens) * minutes_per_day,
                        dtype='datetime64[ns]')
+    #print(minutes[:10], minutes[-10:])
     deltas = np.arange(0, minutes_per_day, dtype='timedelta64[m]')
+    #print(len(market_opens), minutes_per_day, deltas)
     for i, market_open in enumerate(market_opens):
         start = market_open.asm8
         minute_values = start + deltas
         start_ix = minutes_per_day * i
         end_ix = start_ix + minutes_per_day
         minutes[start_ix:end_ix] = minute_values
+        #print(start_ix, end_ix, end_ix-start_ix, len(minute_values))
+
     return pd.to_datetime(minutes, utc=True, box=True)
 
 
@@ -552,6 +557,7 @@ class BcolzMinuteBarWriter(object):
         # use integer division so that the result is an int
         # for pandas index later https://github.com/pandas-dev/pandas/blob/master/pandas/tseries/base.py#L247 # noqa
         num_days = data['shape'][0] // self._minutes_per_day
+        #print(data['shape'][0], self._minutes_per_day)
         if num_days == 0:
             # empty container
             return pd.NaT
@@ -795,23 +801,28 @@ class BcolzMinuteBarWriter(object):
         num_rec_mins = table.size
 
         all_minutes = self._minute_index
+        #print(all_minutes[:10], all_minutes[-10:])
         # Get the latest minute we wish to write to the ctable
         last_minute_to_write = pd.Timestamp(dts[-1], tz='UTC')
+        df_last_minute = pd.DataFrame(all_minutes, index=all_minutes)[:last_minute_to_write]
+        last_minute_to_write = df_last_minute.iloc[-1]
 
         # In the event that we've already written some minutely data to the
         # ctable, guard against overwriting that data.
-        if num_rec_mins > 0:
-            last_recorded_minute = all_minutes[num_rec_mins - 1]
-            if last_minute_to_write <= last_recorded_minute:
-                raise BcolzMinuteOverlappingData(dedent("""
-                Data with last_date={0} already includes input start={1} for
-                sid={2}""".strip()).format(last_date, input_first_day, sid))
-
+        # if num_rec_mins > 0:
+        #     last_recorded_minute = all_minutes[-1]
+        #     #print(last_minute_to_write, last_recorded_minute)
+        #     if last_minute_to_write <= last_recorded_minute:
+        #         last_minute_to_write = last_minute_to_write
+        #         # raise BcolzMinuteOverlappingData(dedent("""
+        #         # Data with last_date={0} already includes input start={1} for
+        #         # sid={2}""".strip()).format(last_date, input_first_day, sid))
+        print([last_minute_to_write, all_minutes[-2:]])
         latest_min_count = all_minutes.get_loc(last_minute_to_write)
 
         # Get all the minutes we wish to write (all market minutes after the
         # latest currently written, up to and including last_minute_to_write)
-        all_minutes_in_window = all_minutes[num_rec_mins:latest_min_count + 1]
+        all_minutes_in_window = all_minutes[num_rec_mins:latest_min_count+1]
 
         minutes_count = all_minutes_in_window.size
 
@@ -822,7 +833,7 @@ class BcolzMinuteBarWriter(object):
         vol_col = np.zeros(minutes_count, dtype=np.uint32)
 
         dt_ixs = np.searchsorted(all_minutes_in_window.values,
-                                 dts.astype('datetime64[ns]'))
+                                 dts.astype('datetime64[ns]'))-1
 
         ohlc_ratio = self.ohlc_ratio_for_sid(sid)
 
